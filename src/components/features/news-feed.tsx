@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { analyzeSentiment, type Sentiment } from "@/lib/sentiment";
 import { useAppStore } from "@/store/use-app-store";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { analyzeNews, type AnalysisResult } from "@/app/actions/analyze-news";
 
 /* ── Types ─────────────── */
 
@@ -71,7 +73,11 @@ export function NewsFeed() {
     const activeSymbol = useAppStore((s) => s.activeSymbol);
     const [news, setNews] = useState<NewsItem[]>([]);
     const [loading, setLoading] = useState(true);
-    const [analyzing, setAnalyzing] = useState<string | null>(null);
+    // Track analyzing state for each item
+    const [analyzing, setAnalyzing] = useState<Record<string, boolean>>({});
+    const [analysisResults, setAnalysisResults] = useState<
+        Record<string, AnalysisResult>
+    >({});
 
     const fetchNews = useCallback(async () => {
         setLoading(true);
@@ -92,10 +98,21 @@ export function NewsFeed() {
         fetchNews();
     }, [fetchNews]);
 
-    // Simulate "deep analysis" button
-    const handleAnalyze = (uuid: string) => {
-        setAnalyzing(uuid);
-        setTimeout(() => setAnalyzing(null), 2000);
+    // Call Server Action
+    const handleAnalyze = async (uuid: string, text: string) => {
+        if (analyzing[uuid]) return;
+
+        setAnalyzing((prev) => ({ ...prev, [uuid]: true }));
+        try {
+            const result = await analyzeNews(text);
+            setAnalysisResults((prev) => ({ ...prev, [uuid]: result }));
+        } catch (err) {
+            console.error(err);
+            // In a real app, show a toast here
+            alert(err instanceof Error ? err.message : "Analysis failed");
+        } finally {
+            setAnalyzing((prev) => ({ ...prev, [uuid]: false }));
+        }
     };
 
     if (loading) {
@@ -120,7 +137,8 @@ export function NewsFeed() {
             <div className="space-y-1">
                 {news.map((item) => {
                     const sentiment = analyzeSentiment(item.title);
-                    const isAnalyzing = analyzing === item.uuid;
+                    const isAnalyzing = analyzing[item.uuid];
+                    const analysis = analysisResults[item.uuid];
 
                     return (
                         <div
@@ -161,14 +179,39 @@ export function NewsFeed() {
                                 <Button
                                     variant="ghost"
                                     size="sm"
-                                    className="h-5 px-1.5 text-[10px] text-muted-foreground/50 hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
-                                    onClick={() => handleAnalyze(item.uuid)}
-                                    disabled={isAnalyzing}
+                                    className="h-6 px-2 text-[10px] text-muted-foreground hover:text-primary hover:bg-muted"
+                                    onClick={() => handleAnalyze(item.uuid, item.title)}
+                                    disabled={isAnalyzing || !!analysis}
                                 >
-                                    <Sparkles className="h-2.5 w-2.5 mr-0.5" />
-                                    {isAnalyzing ? "Analyzing…" : "Analyze"}
+                                    <Sparkles className="h-3 w-3 mr-1" />
+                                    {isAnalyzing ? "Analyzing..." : (analysis ? "Analysis Done" : "✨ AI 解讀")}
                                 </Button>
                             </div>
+
+                            {/* AI Analysis Result */}
+                            {analysis && (
+                                <Alert className="mt-2 bg-muted/50 border-none p-2 animate-in fade-in slide-in-from-top-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-[14px]">
+                                            {analysis.sentiment === "Bullish" && "🚀"}
+                                            {analysis.sentiment === "Bearish" && "🔻"}
+                                            {analysis.sentiment === "Neutral" && "⚖️"}
+                                        </span>
+                                        <AlertTitle className="text-[12px] font-semibold m-0 text-primary">
+                                            AI Analysis
+                                        </AlertTitle>
+                                        <Badge variant="outline" className="ml-auto text-[9px] h-4 px-1">
+                                            {analysis.sentiment}
+                                        </Badge>
+                                    </div>
+                                    <AlertDescription className="text-[11px] leading-relaxed text-foreground/90">
+                                        <p className="mb-1">{analysis.summary}</p>
+                                        <p className="text-muted-foreground italic text-[10px]">
+                                            {analysis.reasoning}
+                                        </p>
+                                    </AlertDescription>
+                                </Alert>
+                            )}
                         </div>
                     );
                 })}

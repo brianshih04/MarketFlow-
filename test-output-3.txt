@@ -1,0 +1,14 @@
+Instantiating YahooFinance...
+Fetching quoteSummary for NQ=F with news module...
+Error caught: yahooFinance.quoteSummary called with invalid options.
+InvalidOptionsError: yahooFinance.quoteSummary called with invalid options.
+    at validate (C:\Users\Brian\.gemini\antigravity\scratch\marketflow\node_modules\yahoo-finance2\script\src\lib\validateAndCoerceTypes.js:231:15)
+    at YahooFinance.moduleExec [as _moduleExec] (C:\Users\Brian\.gemini\antigravity\scratch\marketflow\node_modules\yahoo-finance2\script\src\lib\moduleExec.js:91:49)
+    at YahooFinance.quoteSummary (C:\Users\Brian\.gemini\antigravity\scratch\marketflow\node_modules\yahoo-finance2\script\src\modules\quoteSummary.js:156:17)
+    at test (C:\Users\Brian\.gemini\antigravity\scratch\marketflow\test-news-3.ts:16:43)
+    at fs (C:\Users\Brian\.gemini\antigravity\scratch\marketflow\test-news-3.ts:39:1)
+    at Object.<anonymous> (C:\Users\Brian\.gemini\antigravity\scratch\marketflow\test-news-3.ts:39:6)
+    at Module._compile (node:internal/modules/cjs/loader:1761:14)
+    at Object.transformer (C:\Users\Brian\AppData\Local\npm-cache\_npx\fd45a72a545557e9\node_modules\tsx\dist\register-D46fvsV_.cjs:3:1104)
+    at Module.load (node:internal/modules/cjs/loader:1481:32)
+    at Module._load (node:internal/modules/cjs/loader:1300:12)

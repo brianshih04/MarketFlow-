@@ -4,7 +4,7 @@ import { Bell, User, Clock } from "lucide-react";
 import { useAppStore } from "@/store/use-app-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { SymbolSearch } from "@/components/symbol-search";
+import { SymbolSearch } from "@/components/features/symbol-search";
 import { useEffect, useState } from "react";
 
 function getMarketStatus(): "open" | "closed" | "pre-market" | "after-hours" {

@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { Menu, TrendingUp } from "lucide-react";
-import { Sidebar, SidebarNav } from "@/components/sidebar";
-import { Header } from "@/components/header";
+import { Sidebar, SidebarNav } from "@/components/layout/sidebar";
+import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import {
     Sheet,

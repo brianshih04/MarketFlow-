@@ -15,9 +15,9 @@ import {
   Newspaper,
   Briefcase,
 } from "lucide-react";
-import { TickerTape, WatchlistTable } from "@/components/ticker";
-import { ChartWidget } from "@/components/chart-widget";
-import { NewsFeed } from "@/components/news-feed";
+import { TickerTape, WatchlistTable } from "@/components/features/ticker";
+import { ChartWidget } from "@/components/features/chart-widget";
+import { NewsFeed } from "@/components/features/news-feed";
 import { useAppStore } from "@/store/use-app-store";
 
 /* ── Placeholder Data ─────────────── */
