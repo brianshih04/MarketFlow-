@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Wifi, WifiOff } from "lucide-react";
 import { useAppStore } from "@/store/use-app-store";
+import { TICKER_SYMBOLS_TD, TICKER_DISPLAY_MAP, getDisplayName, toTDSymbol } from "@/lib/twelve-data";
+
+/* ── Types ─────────────── */
 
 interface QuoteData {
     symbol: string;
@@ -15,11 +18,27 @@ interface QuoteData {
     marketState: string | null;
 }
 
-const SYMBOLS = ["AAPL", "NVDA", "NQ=F", "ES=F"];
-
-function encodeSymbol(symbol: string): string {
-    return encodeURIComponent(symbol);
+/** Twelve Data WebSocket price event */
+interface TDPriceEvent {
+    event: "price" | "subscribe-status" | "heartbeat";
+    symbol?: string;
+    price?: number;
+    day_change?: number;
+    day_volume?: number;
+    day_percent_change?: number;
+    currency_base?: string;
+    timestamp?: number;
+    status?: string;
+    message?: string;
 }
+
+/* ── Constants ─────────────── */
+
+const WS_URL = `wss://ws.twelvedata.com/v1/quotes/price?apikey=${process.env.NEXT_PUBLIC_TWELVE_DATA_API_KEY}`;
+const WS_SYMBOLS = TICKER_SYMBOLS_TD.join(",");     // "AAPL,NVDA,NDX,SPX"
+const RECONNECT_DELAY_MS = 3000;
+
+/* ── Formatters ─────────────── */
 
 function formatPrice(price: number | null): string {
     if (price === null || price === undefined) return "N/A";
@@ -42,53 +61,122 @@ function formatVolume(vol: number | null): string {
     return vol.toString();
 }
 
-export function TickerTape() {
-    const [quotes, setQuotes] = useState<QuoteData[]>([]);
-    const [loading, setLoading] = useState(true);
-    const intervalRef = useRef<NodeJS.Timeout | null>(null);
+/* ── useRealtimeQuotes Hook ─────────────── */
 
-    const fetchQuotes = useCallback(async () => {
+/**
+ * Maintains a real-time quote map via Twelve Data WebSocket.
+ *
+ * Strategy:
+ *  1. Seed with REST data immediately so the UI shows something.
+ *  2. Connect WebSocket; on each "price" event update the quote map.
+ *  3. Auto-reconnect after unexpected close.
+ */
+function useRealtimeQuotes(symbols: string[]): {
+    quotes: QuoteData[];
+    wsStatus: "connecting" | "live" | "offline";
+} {
+    const [quotes, setQuotes] = useState<QuoteData[]>([]);
+    const [wsStatus, setWsStatus] = useState<"connecting" | "live" | "offline">("connecting");
+    const wsRef = useRef<WebSocket | null>(null);
+    const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const quotesMapRef = useRef<Map<string, QuoteData>>(new Map());
+    const mountedRef = useRef(true);
+
+    /* Seed quotes from REST on first load */
+    const seedFromRest = useCallback(async () => {
         try {
-            const symbolParam = SYMBOLS.map(encodeSymbol).join(",");
+            const symbolParam = symbols.join(",");
             const res = await fetch(`/api/quote?symbols=${symbolParam}`);
-            if (!res.ok) throw new Error("Fetch failed");
+            if (!res.ok) return;
             const data: QuoteData[] = await res.json();
-            setQuotes(data);
+            data.forEach((q) => quotesMapRef.current.set(q.symbol, q));
+            if (mountedRef.current) {
+                setQuotes([...quotesMapRef.current.values()]);
+            }
         } catch {
-            // Keep existing data on error
-        } finally {
-            setLoading(false);
+            /* Ignore seed failure — WS will carry it */
         }
-    }, []);
+    }, [symbols]);
+
+    /* WebSocket connection */
+    const connect = useCallback(() => {
+        if (!mountedRef.current) return;
+
+        try {
+            const ws = new WebSocket(WS_URL);
+            wsRef.current = ws;
+            setWsStatus("connecting");
+
+            ws.onopen = () => {
+                if (!mountedRef.current) return ws.close();
+                setWsStatus("live");
+                ws.send(JSON.stringify({
+                    action: "subscribe",
+                    params: { symbols: WS_SYMBOLS },
+                }));
+            };
+
+            ws.onmessage = (evt) => {
+                if (!mountedRef.current) return;
+                try {
+                    const msg = JSON.parse(evt.data as string) as TDPriceEvent;
+                    if (msg.event !== "price" || !msg.symbol || msg.price == null) return;
+
+                    const displaySym = TICKER_DISPLAY_MAP[msg.symbol] ?? msg.symbol;
+                    const existing = quotesMapRef.current.get(displaySym);
+
+                    const updated: QuoteData = {
+                        symbol: displaySym,
+                        name: existing?.name ?? getDisplayName(msg.symbol),
+                        shortName: existing?.shortName ?? getDisplayName(msg.symbol),
+                        price: msg.price,
+                        change: msg.day_change ?? existing?.change ?? null,
+                        changePercent: msg.day_percent_change ?? existing?.changePercent ?? null,
+                        dayVolume: msg.day_volume ?? existing?.dayVolume ?? null,
+                        marketState: existing?.marketState ?? "REGULAR",
+                    };
+
+                    quotesMapRef.current.set(displaySym, updated);
+                    setQuotes([...quotesMapRef.current.values()]);
+                } catch {
+                    /* Ignore malformed messages */
+                }
+            };
+
+            ws.onerror = () => {
+                setWsStatus("offline");
+            };
+
+            ws.onclose = (evt) => {
+                if (!mountedRef.current) return;
+                setWsStatus("offline");
+                // Reconnect unless we closed it intentionally (code 1000)
+                if (evt.code !== 1000) {
+                    reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
+                }
+            };
+        } catch {
+            setWsStatus("offline");
+            reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
+        }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
-        fetchQuotes();
-        intervalRef.current = setInterval(fetchQuotes, 5000);
+        mountedRef.current = true;
+        seedFromRest();
+        connect();
+
         return () => {
-            if (intervalRef.current) clearInterval(intervalRef.current);
+            mountedRef.current = false;
+            if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+            wsRef.current?.close(1000, "unmount");
         };
-    }, [fetchQuotes]);
+    }, [seedFromRest, connect]);
 
-    if (loading && quotes.length === 0) {
-        return (
-            <div className="flex h-10 items-center justify-center text-xs text-muted-foreground">
-                <div className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent mr-2" />
-                Loading market data…
-            </div>
-        );
-    }
-
-    return (
-        <div className="relative overflow-hidden">
-            <div className="flex gap-6 py-2 ticker-scroll" style={{ width: "max-content" }}>
-                {/* Duplicate for seamless loop */}
-                {[...quotes, ...quotes].map((q, i) => (
-                    <TickerItem key={`${q.symbol}-${i}`} quote={q} />
-                ))}
-            </div>
-        </div>
-    );
+    return { quotes, wsStatus };
 }
+
+/* ── TickerItem ─────────────── */
 
 function TickerItem({ quote }: { quote: QuoteData }) {
     const isGain = (quote.change ?? 0) >= 0;
@@ -104,10 +192,10 @@ function TickerItem({ quote }: { quote: QuoteData }) {
             </span>
             <span
                 className={`flex items-center gap-0.5 font-mono-num text-xs font-medium ${isFlat
-                    ? "text-muted-foreground"
-                    : isGain
-                        ? "text-gain"
-                        : "text-loss"
+                        ? "text-muted-foreground"
+                        : isGain
+                            ? "text-gain"
+                            : "text-loss"
                     }`}
             >
                 {isFlat ? (
@@ -123,30 +211,57 @@ function TickerItem({ quote }: { quote: QuoteData }) {
     );
 }
 
-/* ── Watchlist Table ─────────────── */
+/* ── TickerTape ─────────────── */
+
+export function TickerTape() {
+    const { quotes, wsStatus } = useRealtimeQuotes(TICKER_SYMBOLS_TD);
+
+    if (quotes.length === 0) {
+        return (
+            <div className="flex h-10 items-center justify-center text-xs text-muted-foreground">
+                <div className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent mr-2" />
+                Loading market data…
+            </div>
+        );
+    }
+
+    return (
+        <div className="relative overflow-hidden">
+            {/* Live / Offline indicator */}
+            <div className="absolute right-2 top-1/2 z-10 -translate-y-1/2">
+                {wsStatus === "live" ? (
+                    <span className="flex items-center gap-1 rounded-full bg-gain/10 px-2 py-0.5 text-[9px] font-semibold text-gain">
+                        <Wifi className="h-2.5 w-2.5" />
+                        LIVE
+                    </span>
+                ) : wsStatus === "connecting" ? (
+                    <span className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-semibold text-primary">
+                        <div className="h-2 w-2 animate-spin rounded-full border border-primary border-t-transparent" />
+                        WS
+                    </span>
+                ) : (
+                    <span className="flex items-center gap-1 rounded-full bg-muted/30 px-2 py-0.5 text-[9px] text-muted-foreground">
+                        <WifiOff className="h-2.5 w-2.5" />
+                        POLLING
+                    </span>
+                )}
+            </div>
+
+            <div className="flex gap-6 py-2 ticker-scroll" style={{ width: "max-content" }}>
+                {[...quotes, ...quotes].map((q, i) => (
+                    <TickerItem key={`${q.symbol}-${i}`} quote={q} />
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/* ── WatchlistTable ─────────────── */
 
 export function WatchlistTable() {
-    const [quotes, setQuotes] = useState<QuoteData[]>([]);
+    const { quotes } = useRealtimeQuotes(TICKER_SYMBOLS_TD);
     const activeSymbol = useAppStore((s) => s.activeSymbol);
     const setActiveSymbol = useAppStore((s) => s.setActiveSymbol);
-
-    const fetchQuotes = useCallback(async () => {
-        try {
-            const symbolParam = SYMBOLS.map(encodeSymbol).join(",");
-            const res = await fetch(`/api/quote?symbols=${symbolParam}`);
-            if (!res.ok) return;
-            const data: QuoteData[] = await res.json();
-            setQuotes(data);
-        } catch {
-            /* ignore */
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchQuotes();
-        const id = setInterval(fetchQuotes, 5000);
-        return () => clearInterval(id);
-    }, [fetchQuotes]);
 
     return (
         <div className="space-y-1">
@@ -157,13 +272,14 @@ export function WatchlistTable() {
             ) : (
                 quotes.map((q) => {
                     const isGain = (q.change ?? 0) >= 0;
-                    const isActive = q.symbol === activeSymbol;
+                    // For watchlist click, map display symbol back to internal symbol
+                    const internalSym = Object.entries(TICKER_DISPLAY_MAP).find(([, v]) => v === q.symbol)?.[0] ?? q.symbol;
+                    const isActive = q.symbol === activeSymbol || internalSym === activeSymbol;
+
                     return (
                         <button
                             key={q.symbol}
-                            onClick={() =>
-                                setActiveSymbol(q.symbol, q.name || q.shortName)
-                            }
+                            onClick={() => setActiveSymbol(internalSym, q.name || q.shortName)}
                             className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-left transition-all ${isActive
                                     ? "bg-primary/10 ring-1 ring-primary/20"
                                     : "hover:bg-muted/50"
@@ -171,9 +287,7 @@ export function WatchlistTable() {
                         >
                             <div className="flex flex-col">
                                 <span
-                                    className={`font-semibold ${isActive
-                                            ? "text-primary"
-                                            : "text-foreground"
+                                    className={`font-semibold ${isActive ? "text-primary" : "text-foreground"
                                         }`}
                                 >
                                     {q.symbol}
