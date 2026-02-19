@@ -7,12 +7,16 @@ import {
     CandlestickSeries,
     HistogramSeries,
     LineSeries,
+    createSeriesMarkers,
     type IChartApi,
     type ISeriesApi,
+    type ISeriesMarkersPluginApi,
     type CandlestickData,
     type Time,
+    type SeriesMarker,
 } from "lightweight-charts";
 import { Button } from "@/components/ui/button";
+import { findFVGs } from "@/lib/ict";
 
 /* ── Types ─────────────── */
 
@@ -104,6 +108,7 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
     const candleDataRef = useRef<CandleData[]>([]);
     const sma20DataRef = useRef<{ time: string | number; value: number }[]>([]);
     const sma50DataRef = useRef<{ time: string | number; value: number }[]>([]);
+    const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
 
     const [activeTF, setActiveTF] = useState(2); // default → "1M"
     const [loading, setLoading] = useState(false);
@@ -340,6 +345,28 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
                 sma50Data.map((d) => ({ time: d.time as Time, value: d.value }))
             );
 
+            // ── ICT: FVG zones + Entry Signal markers (v5 plugin API) ──
+            if (candleSeriesRef.current) {
+                const fvgMarkers = findFVGs(candles).map((m) => ({
+                    time: m.time as Time,
+                    position: m.position,
+                    color: m.color,
+                    shape: m.shape,
+                    text: m.text,
+                    size: m.size ?? 1,
+                })) as SeriesMarker<Time>[];
+
+                if (!markersPluginRef.current) {
+                    // Create the plugin once after the series exists
+                    markersPluginRef.current = createSeriesMarkers(
+                        candleSeriesRef.current,
+                        fvgMarkers
+                    );
+                } else {
+                    markersPluginRef.current.setMarkers(fvgMarkers);
+                }
+            }
+
             // ── Set initial legend to last bar ──
             const last = candles[candles.length - 1];
             setLegend({
@@ -377,8 +404,8 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
                         variant={activeTF === i ? "default" : "ghost"}
                         size="sm"
                         className={`h-6 px-2.5 text-xs font-mono-num ${activeTF === i
-                                ? "bg-primary text-primary-foreground"
-                                : "text-muted-foreground hover:text-foreground"
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground"
                             }`}
                         onClick={() => setActiveTF(i)}
                     >
