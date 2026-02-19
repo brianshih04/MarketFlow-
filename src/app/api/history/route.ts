@@ -66,7 +66,15 @@ export async function GET(request: Request) {
         "1M": "1mo", "1mo": "1mo",
     };
     const yfInterval = (intervalMap[interval] ?? "1d") as YFInterval;
-    const period1 = rangeToDate(range);
+
+    // ── Dynamic range override based on Yahoo Finance intraday limits ──
+    let resolvedRange = range;
+    if (interval === "1m") resolvedRange = "5d";
+    else if (interval === "5m" || interval === "15m") resolvedRange = "1mo";
+    else if (interval === "30m" || interval === "60m" || interval === "1h") resolvedRange = "3mo";
+
+    const period1 = rangeToDate(resolvedRange);
+
     const daily = isDailyOrAbove(yfInterval);
 
     try {

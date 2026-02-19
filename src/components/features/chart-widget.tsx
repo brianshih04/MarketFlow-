@@ -81,15 +81,25 @@ function fmtVol(n: number | null): string {
 
 /* ── Timeframe presets ─────────────── */
 
-const TIMEFRAMES = [
-    { label: "1D", range: "5d", interval: "5m" },
-    { label: "1W", range: "1mo", interval: "15m" },
-    { label: "1M", range: "1mo", interval: "1d" },
-    { label: "3M", range: "3mo", interval: "1d" },
-    { label: "6M", range: "6mo", interval: "1d" },
-    { label: "1Y", range: "1y", interval: "1d" },
-    { label: "5Y", range: "5y", interval: "1wk" },
+const INTRADAY_TFS = [
+    { label: "1m", interval: "1m" },
+    { label: "5m", interval: "5m" },
+    { label: "15m", interval: "15m" },
+    { label: "30m", interval: "30m" },
+    { label: "60m", interval: "60m" },
 ] as const;
+
+const DAILY_TFS = [
+    { label: "1D", interval: "1d" },
+    { label: "1W", interval: "1wk" },
+    { label: "1M", interval: "1mo" },
+    { label: "3M", interval: "1d", range: "3mo" },
+    { label: "1Y", interval: "1d", range: "1y" },
+    { label: "5Y", interval: "1wk", range: "5y" },
+] as const;
+
+type IntradayInterval = (typeof INTRADAY_TFS)[number]["interval"];
+type DailyLabel = (typeof DAILY_TFS)[number]["label"];
 
 /* ── Component ─────────────── */
 
@@ -110,7 +120,9 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
     const sma50DataRef = useRef<{ time: string | number; value: number }[]>([]);
     const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
 
-    const [activeTF, setActiveTF] = useState(2); // default → "1M"
+    // Timeframe state: intraday interval OR daily selector index
+    const [activeInterval, setActiveInterval] = useState<string>("15m");
+    const [activeDailyIdx, setActiveDailyIdx] = useState<number | null>(null); // null = intraday mode
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [legend, setLegend] = useState<LegendData | null>(null);
@@ -118,13 +130,14 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
     /* ── Fetch helper ─────────────── */
 
     const fetchHistory = useCallback(
-        async (range: string, interval: string) => {
+        async (interval: string, range?: string) => {
             setLoading(true);
             setError(null);
             try {
                 const encoded = encodeURIComponent(symbol);
+                const rangeParam = range ? `&range=${range}` : "";
                 const res = await fetch(
-                    `/api/history?symbol=${encoded}&range=${range}&interval=${interval}`
+                    `/api/history?symbol=${encoded}&interval=${interval}${rangeParam}`
                 );
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const json = await res.json();
@@ -297,13 +310,25 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
         };
     }, []);
 
-    /* ── Load data on tf / symbol change ─────────────── */
+    /* ── Load data on interval / symbol change ─────────────── */
 
     useEffect(() => {
         let cancelled = false;
-        const tf = TIMEFRAMES[activeTF];
 
-        fetchHistory(tf.range, tf.interval).then((candles) => {
+        // Resolve interval + optional manual range
+        let interval: string;
+        let range: string | undefined;
+
+        if (activeDailyIdx !== null) {
+            const tf = DAILY_TFS[activeDailyIdx];
+            interval = tf.interval;
+            range = (tf as { range?: string }).range;
+        } else {
+            interval = activeInterval;
+            range = undefined; // backend auto-resolves for intraday
+        }
+
+        fetchHistory(interval, range).then((candles) => {
             if (cancelled || !candles.length) return;
 
             candleDataRef.current = candles;
@@ -390,33 +415,53 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
         return () => {
             cancelled = true;
         };
-    }, [activeTF, symbol, fetchHistory]);
+    }, [activeInterval, activeDailyIdx, symbol, fetchHistory]);
 
     /* ── Render ─────────────── */
 
     return (
         <div className="flex h-full flex-col">
-            {/* Timeframe Selector */}
-            <div className="flex items-center gap-1 px-2 pb-2">
-                {TIMEFRAMES.map((tf, i) => (
-                    <Button
-                        key={tf.label}
-                        variant={activeTF === i ? "default" : "ghost"}
-                        size="sm"
-                        className={`h-6 px-2.5 text-xs font-mono-num ${activeTF === i
-                            ? "bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:text-foreground"
-                            }`}
-                        onClick={() => setActiveTF(i)}
-                    >
-                        {tf.label}
-                    </Button>
-                ))}
+            {/* Timeframe Toolbar */}
+            <div className="flex flex-col gap-1 px-2 pb-2">
+                {/* Intraday row */}
+                <div className="flex items-center gap-1">
+                    <span className="text-[9px] text-muted-foreground/50 uppercase mr-1 font-mono">Intraday</span>
+                    {INTRADAY_TFS.map((tf) => (
+                        <Button
+                            key={tf.interval}
+                            variant={activeDailyIdx === null && activeInterval === tf.interval ? "default" : "ghost"}
+                            size="sm"
+                            className={`h-6 px-2.5 text-xs font-mono-num ${activeDailyIdx === null && activeInterval === tf.interval
+                                    ? "bg-primary text-primary-foreground"
+                                    : "text-muted-foreground hover:text-foreground"
+                                }`}
+                            onClick={() => { setActiveInterval(tf.interval); setActiveDailyIdx(null); }}
+                        >
+                            {tf.label}
+                        </Button>
+                    ))}
+                    <div className="mx-1 h-4 w-px bg-border/50" />
+                    <span className="text-[9px] text-muted-foreground/50 uppercase mr-1 font-mono">Daily</span>
+                    {DAILY_TFS.map((tf, i) => (
+                        <Button
+                            key={tf.label}
+                            variant={activeDailyIdx === i ? "default" : "ghost"}
+                            size="sm"
+                            className={`h-6 px-2.5 text-xs font-mono-num ${activeDailyIdx === i
+                                    ? "bg-primary text-primary-foreground"
+                                    : "text-muted-foreground hover:text-foreground"
+                                }`}
+                            onClick={() => setActiveDailyIdx(i)}
+                        >
+                            {tf.label}
+                        </Button>
+                    ))}
 
-                {loading && (
-                    <div className="ml-2 h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                )}
-                {error && <span className="ml-2 text-xs text-loss">{error}</span>}
+                    {loading && (
+                        <div className="ml-2 h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                    )}
+                    {error && <span className="ml-2 text-xs text-loss">{error}</span>}
+                </div>
             </div>
 
             {/* Chart + Legend Container */}
