@@ -59,7 +59,7 @@ export default function DashboardPage() {
   }, []);
 
   // Subscribe at page level so TickerTape + ChartWidget share one WS connection
-  const { wsStatus } = useRealtimeQuotes(TICKER_SYMBOLS_FH, handleLiveTrade);
+  const { quotes: tickerQuotes, wsStatus } = useRealtimeQuotes(TICKER_SYMBOLS_FH, handleLiveTrade);
 
   /* Callback for ChartWidget to register its internal live-update handler */
   const registerChartHandler = useCallback((handler: (trade: LiveTrade) => void) => {
@@ -71,7 +71,7 @@ export default function DashboardPage() {
       {/* Ticker Tape */}
       <Card className="glow-card border-border/50 bg-card">
         <CardContent className="px-4 py-0">
-          <TickerTape />
+          <TickerTape quotes={tickerQuotes} wsStatus={wsStatus} />
         </CardContent>
       </Card>
 
@@ -129,7 +129,7 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-2 pt-0">
-            <WatchlistTable />
+            <WatchlistTable quotes={tickerQuotes} />
           </CardContent>
         </Card>
 

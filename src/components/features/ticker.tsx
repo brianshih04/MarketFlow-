@@ -222,8 +222,13 @@ function TickerItem({ quote }: { quote: QuoteData }) {
 
 /* ── TickerTape ─────────────── */
 
-export function TickerTape() {
-    const { quotes, wsStatus } = useRealtimeQuotes(TICKER_SYMBOLS_FH);
+export function TickerTape({
+    quotes,
+    wsStatus,
+}: {
+    quotes: QuoteData[];
+    wsStatus: "connecting" | "live" | "offline";
+}) {
 
     if (quotes.length === 0) {
         return (
@@ -263,8 +268,7 @@ export function TickerTape() {
 
 /* ── WatchlistTable ─────────────── */
 
-export function WatchlistTable() {
-    const { quotes } = useRealtimeQuotes(TICKER_SYMBOLS_FH);
+export function WatchlistTable({ quotes }: { quotes: QuoteData[] }) {
     const activeSymbol = useAppStore((s) => s.activeSymbol);
     const setActiveSymbol = useAppStore((s) => s.setActiveSymbol);
 
