@@ -104,8 +104,9 @@ export function fromTimestampForInterval(interval: string): number {
 /** Watchlist symbols for the tape (Finnhub free-tier US equities) */
 export const TICKER_SYMBOLS_FH = ["AAPL", "NVDA", "QQQ", "SPY"];
 
-/** Display label overrides for the UI tape */
-export const TICKER_DISPLAY_MAP: Record<string, string> = {
-    "QQQ": "NQ",
-    "SPY": "ES",
-};
+/**
+ * Display label overrides — empty so symbols show as-is.
+ * QQQ shows as "QQQ", SPY as "SPY", etc.
+ */
+export const TICKER_DISPLAY_MAP: Record<string, string> = {};
+

@@ -181,8 +181,13 @@ export function useRealtimeQuotes(
         seedFromRest();
         connect();
 
+        // Polling fallback: refresh REST data every 30s regardless of WS status.
+        // Keeps prices fresh after hours, on weekends, or if WS has no trade events.
+        const pollInterval = setInterval(seedFromRest, 30_000);
+
         return () => {
             mountedRef.current = false;
+            clearInterval(pollInterval);
             if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
             // Unsubscribe cleanly before closing
             if (wsRef.current?.readyState === WebSocket.OPEN) {
