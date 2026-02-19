@@ -1,26 +1,20 @@
 import { NextResponse } from "next/server";
-import { toTDSymbol, getDisplayName, TICKER_DISPLAY_MAP } from "@/lib/twelve-data";
+import { toFHSymbol, getDisplayName, TICKER_DISPLAY_MAP } from "@/lib/finnhub";
 
 export const dynamic = "force-dynamic";
 
-const API_KEY = process.env.TWELVE_DATA_API_KEY;
-const BASE_URL = "https://api.twelvedata.com";
+const API_KEY = process.env.NEXT_PUBLIC_FINNHUB_API_KEY;
+const BASE_URL = "https://finnhub.io/api/v1";
 
-interface TDQuote {
-    symbol: string;
-    name: string;
-    exchange: string;
-    currency: string;
-    datetime: string;
-    open: string;
-    high: string;
-    low: string;
-    close: string;
-    volume: string;
-    previous_close: string;
-    change: string;
-    percent_change: string;
-    is_market_open: boolean;
+interface FHQuote {
+    c: number;  // Current price
+    d: number;  // Change
+    dp: number;  // Percent change
+    h: number;  // High
+    l: number;  // Low
+    o: number;  // Open price of the day
+    pc: number;  // Previous close price
+    t: number;  // Timestamp
 }
 
 export async function GET(request: Request) {
@@ -36,74 +30,64 @@ export async function GET(request: Request) {
 
     if (!API_KEY) {
         return NextResponse.json(
-            { error: "TWELVE_DATA_API_KEY not configured" },
+            { error: "NEXT_PUBLIC_FINNHUB_API_KEY not configured" },
             { status: 500 }
         );
     }
 
-    // Map each incoming symbol to its Twelve Data equivalent
     const rawSymbols = symbolsParam.split(",").map((s) => s.trim()).filter(Boolean);
-    const tdSymbols = rawSymbols.map(toTDSymbol);
 
-    const url = new URL(`${BASE_URL}/quote`);
-    url.searchParams.set("symbol", tdSymbols.join(","));
-    url.searchParams.set("apikey", API_KEY);
+    // Finnhub quote is per-symbol, no batch endpoint on free tier → parallel fetch
+    const results = await Promise.allSettled(
+        rawSymbols.map(async (rawSym) => {
+            const fhSym = toFHSymbol(rawSym);
+            const displaySym = TICKER_DISPLAY_MAP[fhSym] ?? rawSym;
 
-    try {
-        const res = await fetch(url.toString(), { cache: "no-store" });
-        if (!res.ok) throw new Error(`Twelve Data HTTP ${res.status}`);
+            try {
+                const url = new URL(`${BASE_URL}/quote`);
+                url.searchParams.set("symbol", fhSym);
+                url.searchParams.set("token", API_KEY);
 
-        const json = await res.json();
+                const res = await fetch(url.toString(), { cache: "no-store" });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-        // For a single symbol TD returns the object directly;
-        // for multiple it returns { "AAPL": {...}, "NVDA": {...} }
-        const resultsMap = tdSymbols.length === 1
-            ? { [tdSymbols[0]]: json }
-            : (json as Record<string, TDQuote>);
+                const q: FHQuote = await res.json();
+                const price = q.c ?? null;
 
-        const data = rawSymbols.map((rawSym, idx) => {
-            const tdSym = tdSymbols[idx];
-            const q = resultsMap[tdSym] as TDQuote | undefined;
-            const displaySym = TICKER_DISPLAY_MAP[tdSym] ?? rawSym;
+                // Finnhub returns a profile-based name; use our local lookup
+                const name = getDisplayName(fhSym);
 
-            if (!q || q.close == null) {
                 return {
                     symbol: displaySym,
-                    name: getDisplayName(tdSym),
-                    shortName: getDisplayName(tdSym),
-                    price: null,
-                    change: null,
-                    changePercent: null,
-                    dayVolume: null,
-                    marketState: null,
+                    name,
+                    shortName: name,
+                    price,
+                    change: q.d ?? null,
+                    changePercent: q.dp ?? null,
+                    dayVolume: null, // not in /quote endpoint — use WS for live vol
+                    marketState: price ? "REGULAR" : "CLOSED",
+                };
+            } catch {
+                return {
+                    symbol: displaySym,
+                    name: getDisplayName(toFHSymbol(rawSym)),
+                    shortName: displaySym,
+                    price: null, change: null, changePercent: null,
+                    dayVolume: null, marketState: null,
                 };
             }
+        })
+    );
 
-            return {
-                symbol: displaySym,
-                name: q.name || getDisplayName(tdSym),
-                shortName: q.name || getDisplayName(tdSym),
-                price: parseFloat(q.close),
-                change: parseFloat(q.change),
-                changePercent: parseFloat(q.percent_change),
-                dayVolume: q.volume ? parseFloat(q.volume) : null,
-                marketState: q.is_market_open ? "REGULAR" : "CLOSED",
-            };
-        });
-
-        return NextResponse.json(data, {
-            headers: { "Cache-Control": "no-store, max-age=0" },
-        });
-    } catch (err) {
-        console.error("[quote/td] Error:", err);
-        // Return nulls for all symbols on error so UI degrades gracefully
-        const fallback = rawSymbols.map((s) => ({
-            symbol: s, name: s, shortName: s,
+    const data = results.map((r) =>
+        r.status === "fulfilled" ? r.value : {
+            symbol: "UNKNOWN", name: "Unknown", shortName: "Unknown",
             price: null, change: null, changePercent: null,
             dayVolume: null, marketState: null,
-        }));
-        return NextResponse.json(fallback, {
-            headers: { "Cache-Control": "no-store, max-age=0" },
-        });
-    }
+        }
+    );
+
+    return NextResponse.json(data, {
+        headers: { "Cache-Control": "no-store, max-age=0" },
+    });
 }

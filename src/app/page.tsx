@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -17,12 +17,14 @@ import {
   Briefcase,
   Crosshair,
 } from "lucide-react";
-import { TickerTape, WatchlistTable } from "@/components/features/ticker";
+import { TickerTape, WatchlistTable, useRealtimeQuotes } from "@/components/features/ticker";
 import { ChartWidget } from "@/components/features/chart-widget";
 import { NewsFeed } from "@/components/features/news-feed";
 import { SignalPanel } from "@/components/features/signal-panel";
 import { useAppStore } from "@/store/use-app-store";
 import { type ICTSignal } from "@/lib/ict";
+import { type LiveTrade } from "@/components/features/ticker";
+import { TICKER_SYMBOLS_FH, toFHSymbol } from "@/lib/finnhub";
 
 /* ── Placeholder Data ─────────────── */
 
@@ -48,6 +50,22 @@ export default function DashboardPage() {
   const [signals, setSignals] = useState<ICTSignal[]>([]);
   const [currentInterval, setCurrentInterval] = useState("15m");
 
+  /* ── Page-level Finnhub WebSocket ── */
+  // Live trade handler ref — points to ChartWidget's internal updater
+  const chartLiveHandlerRef = useRef<((trade: LiveTrade) => void) | null>(null);
+
+  const handleLiveTrade = useCallback((trade: LiveTrade) => {
+    chartLiveHandlerRef.current?.(trade);
+  }, []);
+
+  // Subscribe at page level so TickerTape + ChartWidget share one WS connection
+  const { wsStatus } = useRealtimeQuotes(TICKER_SYMBOLS_FH, handleLiveTrade);
+
+  /* Callback for ChartWidget to register its internal live-update handler */
+  const registerChartHandler = useCallback((handler: (trade: LiveTrade) => void) => {
+    chartLiveHandlerRef.current = handler;
+  }, []);
+
   return (
     <div className="space-y-4">
       {/* Ticker Tape */}
@@ -66,6 +84,11 @@ export default function DashboardPage() {
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
               <span className="text-foreground font-semibold">{activeSymbol}</span>
               <span className="text-muted-foreground font-normal">— {activeSymbolName}</span>
+              {wsStatus === "live" && (
+                <span className="ml-auto text-[9px] rounded-full bg-gain/10 px-2 py-0.5 font-mono text-gain">
+                  ● LIVE
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="h-[300px] md:h-[380px] lg:h-[500px] p-2 pt-0">
@@ -126,14 +149,10 @@ export default function DashboardPage() {
               >
                 <div className="flex flex-col">
                   <span className="font-semibold">{m.symbol}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {m.name}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{m.name}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono-num text-sm">
-                    ${m.price.toFixed(2)}
-                  </span>
+                  <span className="font-mono-num text-sm">${m.price.toFixed(2)}</span>
                   <Badge
                     variant="outline"
                     className={`font-mono-num text-xs ${m.change >= 0
@@ -141,13 +160,8 @@ export default function DashboardPage() {
                       : "border-loss/30 bg-loss/10 text-loss"
                       }`}
                   >
-                    {m.change >= 0 ? (
-                      <TrendingUp className="mr-0.5 h-3 w-3" />
-                    ) : (
-                      <TrendingDown className="mr-0.5 h-3 w-3" />
-                    )}
-                    {m.change >= 0 ? "+" : ""}
-                    {m.change}%
+                    {m.change >= 0 ? <TrendingUp className="mr-0.5 h-3 w-3" /> : <TrendingDown className="mr-0.5 h-3 w-3" />}
+                    {m.change >= 0 ? "+" : ""}{m.change}%
                   </Badge>
                 </div>
               </div>
@@ -193,18 +207,11 @@ export default function DashboardPage() {
                     </span>
                   </div>
                   <div className="flex flex-col items-end">
-                    <span
-                      className={`font-mono-num text-sm font-semibold ${isGain ? "text-gain" : "text-loss"
-                        }`}
-                    >
+                    <span className={`font-mono-num text-sm font-semibold ${isGain ? "text-gain" : "text-loss"}`}>
                       {isGain ? "+" : ""}${pnl.toFixed(2)}
                     </span>
-                    <span
-                      className={`font-mono-num text-xs ${isGain ? "text-gain" : "text-loss"
-                        }`}
-                    >
-                      {isGain ? "+" : ""}
-                      {pnlPct.toFixed(2)}%
+                    <span className={`font-mono-num text-xs ${isGain ? "text-gain" : "text-loss"}`}>
+                      {isGain ? "+" : ""}{pnlPct.toFixed(2)}%
                     </span>
                   </div>
                 </div>

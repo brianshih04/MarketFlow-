@@ -1,33 +1,27 @@
 import { NextResponse } from "next/server";
 import {
-    toTDSymbol,
-    TD_INTERVAL_MAP,
-    isDailyInterval,
-    outputsizeForInterval,
-} from "@/lib/twelve-data";
+    toFHSymbol,
+    FH_RESOLUTION_MAP,
+    isDailyResolution,
+    fromTimestampForInterval,
+} from "@/lib/finnhub";
 
 export const dynamic = "force-dynamic";
 
-const API_KEY = process.env.TWELVE_DATA_API_KEY;
-const BASE_URL = "https://api.twelvedata.com";
+const API_KEY = process.env.NEXT_PUBLIC_FINNHUB_API_KEY;
+const BASE_URL = "https://finnhub.io/api/v1";
 
 /**
- * Parse a Twelve Data datetime string to the appropriate chart time format.
- *   Intraday  → Unix seconds (number)
- *   Daily+    → "YYYY-MM-DD" string
- *
- * TD datetimes: "2024-01-15 09:30:00" or "2024-01-15"
+ * Format a Unix timestamp for Lightweight Charts:
+ *   - Daily+ → "YYYY-MM-DD" string
+ *   - Intraday → Unix seconds (number, as-is)
  */
-function parseDateTime(datetime: string, isDaily: boolean): number | string {
+function toChartTime(unixSec: number, isDaily: boolean): string | number {
     if (isDaily) {
-        // Already "YYYY-MM-DD", but may have time component — strip it
-        return datetime.split(" ")[0];
+        const d = new Date(unixSec * 1000);
+        return d.toISOString().split("T")[0];
     }
-    // Intraday: convert "YYYY-MM-DD HH:MM:SS" → Unix seconds
-    // TD returns times in the exchange's local timezone; treat as ET (UTC-5 winter)
-    const isoish = datetime.replace(" ", "T") + "-05:00";
-    const d = new Date(isoish);
-    return Math.floor(d.getTime() / 1000);
+    return unixSec;
 }
 
 export async function GET(request: Request) {
@@ -44,67 +38,64 @@ export async function GET(request: Request) {
 
     if (!API_KEY) {
         return NextResponse.json(
-            { error: "TWELVE_DATA_API_KEY not configured" },
+            { error: "NEXT_PUBLIC_FINNHUB_API_KEY not configured" },
             { status: 500 }
         );
     }
 
-    // Map user symbol → Twelve Data symbol
-    const tdSymbol = toTDSymbol(rawSymbol);
-    const tdInterval = TD_INTERVAL_MAP[interval] ?? "15min";
-    const daily = isDailyInterval(tdInterval);
-    const outputsize = outputsizeForInterval(tdInterval);
+    const fhSymbol = toFHSymbol(rawSymbol);
+    const resolution = FH_RESOLUTION_MAP[interval] ?? "15";
+    const daily = isDailyResolution(resolution);
+    const from = fromTimestampForInterval(interval);
+    const to = Math.floor(Date.now() / 1000);
 
-    const url = new URL(`${BASE_URL}/time_series`);
-    url.searchParams.set("symbol", tdSymbol);
-    url.searchParams.set("interval", tdInterval);
-    url.searchParams.set("outputsize", String(outputsize));
-    url.searchParams.set("apikey", API_KEY);
+    const url = new URL(`${BASE_URL}/stock/candle`);
+    url.searchParams.set("symbol", fhSymbol);
+    url.searchParams.set("resolution", resolution);
+    url.searchParams.set("from", String(from));
+    url.searchParams.set("to", String(to));
+    url.searchParams.set("token", API_KEY);
 
     try {
         const res = await fetch(url.toString(), { cache: "no-store" });
+
         if (!res.ok) {
-            throw new Error(`Twelve Data HTTP ${res.status}`);
+            throw new Error(`Finnhub HTTP ${res.status}`);
         }
 
         const json = await res.json();
 
-        if (json.status === "error") {
-            console.error(`[history/td] API error for ${tdSymbol}:`, json.message);
-            return NextResponse.json(
-                { error: json.message ?? "Twelve Data API error", code: json.code },
-                { status: 502 }
-            );
+        // Finnhub returns { s: "no_data" } when there's nothing available
+        if (json.s === "no_data") {
+            return NextResponse.json({ symbol: fhSymbol, interval, count: 0, candles: [] });
         }
 
-        // json.values is newest-first; we need oldest-first for Lightweight Charts
-        const raw: Array<{
-            datetime: string;
-            open: string;
-            high: string;
-            low: string;
-            close: string;
-            volume?: string;
-        }> = Array.isArray(json.values) ? json.values : [];
+        if (json.s !== "ok") {
+            throw new Error(`Finnhub error: ${JSON.stringify(json)}`);
+        }
 
-        const candles = raw
-            .reverse() // oldest → newest
-            .filter((v) => v.open && v.close) // filter incomplete rows
-            .map((v) => ({
-                time: parseDateTime(v.datetime, daily),
-                open: parseFloat(v.open),
-                high: parseFloat(v.high),
-                low: parseFloat(v.low),
-                close: parseFloat(v.close),
-                volume: v.volume ? parseFloat(v.volume) : 0,
-            }));
+        // Construct candles from parallel arrays: c, h, l, o, t, v
+        const { c, h, l, o, t, v } = json as {
+            c: number[]; h: number[]; l: number[];
+            o: number[]; t: number[]; v: number[];
+        };
 
+        const candles = t.map((timestamp: number, i: number) => ({
+            time: toChartTime(timestamp, daily),
+            open: o[i],
+            high: h[i],
+            low: l[i],
+            close: c[i],
+            volume: v?.[i] ?? 0,
+        }));
+
+        // Finnhub returns oldest-first already — no reversal needed
         return NextResponse.json(
-            { symbol: tdSymbol, interval: tdInterval, count: candles.length, candles },
+            { symbol: fhSymbol, interval, count: candles.length, candles },
             { headers: { "Cache-Control": "no-store, max-age=0" } }
         );
     } catch (err) {
-        console.error(`[history/td] Error fetching ${tdSymbol}:`, err);
+        console.error(`[history/fh] Error fetching ${fhSymbol}:`, err);
         return NextResponse.json(
             { error: `Failed to fetch history for ${rawSymbol}`, detail: String(err) },
             { status: 500 }
