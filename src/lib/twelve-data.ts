@@ -8,14 +8,14 @@
 
 /** Map Yahoo-style symbols → Twelve Data symbols */
 const SYMBOL_MAP: Record<string, string> = {
-    // US Equity Futures → Indices (Twelve Data free tier)
-    "NQ=F": "NDX",    // Nasdaq 100 Index
-    "ES=F": "SPX",    // S&P 500 Index
-    "YM=F": "DJI",    // Dow Jones Industrial
-    "RTY=F": "RUT",    // Russell 2000
-    "GC=F": "XAU/USD",// Gold spot
-    "CL=F": "WTI",    // WTI Crude Oil
-    "SI=F": "XAG/USD",// Silver spot
+    // US Futures → Free-tier ETF proxies (indices need Grow plan on TD)
+    "NQ=F": "QQQ",    // Nasdaq 100 ETF
+    "ES=F": "SPY",    // S&P 500 ETF
+    "YM=F": "DIA",    // Dow Jones ETF
+    "RTY=F": "IWM",    // Russell 2000 ETF
+    "GC=F": "GLD",    // Gold ETF
+    "CL=F": "USO",    // WTI Oil ETF
+    "SI=F": "SLV",    // Silver ETF
 
     // Crypto
     "BTC-USD": "BTC/USD",
@@ -32,10 +32,13 @@ const SYMBOL_MAP: Record<string, string> = {
  * Falls back to the symbol itself.
  */
 const DISPLAY_NAMES: Record<string, string> = {
-    "NDX": "Nasdaq 100",
-    "SPX": "S&P 500",
-    "DJI": "Dow Jones",
-    "RUT": "Russell 2000",
+    "QQQ": "Nasdaq 100 ETF",
+    "SPY": "S&P 500 ETF",
+    "DIA": "Dow Jones ETF",
+    "IWM": "Russell 2000 ETF",
+    "GLD": "Gold ETF",
+    "USO": "WTI Oil ETF",
+    "SLV": "Silver ETF",
     "AAPL": "Apple Inc.",
     "NVDA": "NVIDIA Corp.",
     "MSFT": "Microsoft Corp.",
@@ -43,8 +46,6 @@ const DISPLAY_NAMES: Record<string, string> = {
     "AMZN": "Amazon.com",
     "GOOGL": "Alphabet Inc.",
     "META": "Meta Platforms",
-    "XAU/USD": "Gold Spot",
-    "WTI": "WTI Crude Oil",
     "BTC/USD": "Bitcoin",
     "ETH/USD": "Ethereum",
 };
@@ -98,11 +99,11 @@ export function outputsizeForInterval(interval: string): number {
     return 300;
 }
 
-/** Ticker symbols to watch in the market tape (Twelve Data-compatible) */
-export const TICKER_SYMBOLS_TD = ["AAPL", "NVDA", "NDX", "SPX"];
+/** Ticker symbols to watch in the market tape (Twelve Data free-tier compatible) */
+export const TICKER_SYMBOLS_TD = ["AAPL", "NVDA", "QQQ", "SPY"];
 
-/** Map Twelve Data symbols back to display symbols for the UI */
+/** Map Twelve Data / display symbols back to UI shorthand labels */
 export const TICKER_DISPLAY_MAP: Record<string, string> = {
-    "NDX": "NQ",
-    "SPX": "ES",
+    "QQQ": "NQ",
+    "SPY": "ES",
 };

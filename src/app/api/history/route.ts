@@ -70,7 +70,11 @@ export async function GET(request: Request) {
         const json = await res.json();
 
         if (json.status === "error") {
-            throw new Error(json.message ?? "Twelve Data API error");
+            console.error(`[history/td] API error for ${tdSymbol}:`, json.message);
+            return NextResponse.json(
+                { error: json.message ?? "Twelve Data API error", code: json.code },
+                { status: 502 }
+            );
         }
 
         // json.values is newest-first; we need oldest-first for Lightweight Charts
