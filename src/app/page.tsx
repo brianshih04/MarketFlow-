@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Card,
   CardContent,
@@ -14,11 +15,14 @@ import {
   TrendingDown,
   Newspaper,
   Briefcase,
+  Crosshair,
 } from "lucide-react";
 import { TickerTape, WatchlistTable } from "@/components/features/ticker";
 import { ChartWidget } from "@/components/features/chart-widget";
 import { NewsFeed } from "@/components/features/news-feed";
+import { SignalPanel } from "@/components/features/signal-panel";
 import { useAppStore } from "@/store/use-app-store";
+import { type ICTSignal } from "@/lib/ict";
 
 /* ── Placeholder Data ─────────────── */
 
@@ -28,7 +32,6 @@ const movers = [
   { symbol: "AMD", name: "AMD Inc.", change: -4.1, price: 162.9 },
   { symbol: "TSLA", name: "Tesla Inc.", change: -2.8, price: 345.6 },
 ];
-
 
 const positions = [
   { symbol: "AAPL", qty: 100, entry: 189.5, current: 192.3 },
@@ -41,6 +44,9 @@ const positions = [
 export default function DashboardPage() {
   const activeSymbol = useAppStore((s) => s.activeSymbol);
   const activeSymbolName = useAppStore((s) => s.activeSymbolName);
+
+  const [signals, setSignals] = useState<ICTSignal[]>([]);
+  const [currentInterval, setCurrentInterval] = useState("15m");
 
   return (
     <div className="space-y-4">
@@ -63,7 +69,31 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="h-[300px] md:h-[380px] lg:h-[500px] p-2 pt-0">
-            <ChartWidget symbol={activeSymbol} />
+            <ChartWidget
+              symbol={activeSymbol}
+              onSignals={setSignals}
+              onIntervalChange={setCurrentInterval}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Signal Panel — ICT Composite Score */}
+        <Card className="glow-card border-border/50 bg-card">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Crosshair className="h-4 w-4" />
+              高機率設置
+              <Badge variant="outline" className="ml-auto text-[9px] font-mono border-primary/30 text-primary/70">
+                複合評分
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-2 pt-0">
+            <SignalPanel
+              signals={signals}
+              symbol={activeSymbol}
+              interval={currentInterval}
+            />
           </CardContent>
         </Card>
 

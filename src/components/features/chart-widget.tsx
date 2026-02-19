@@ -16,7 +16,7 @@ import {
     type SeriesMarker,
 } from "lightweight-charts";
 import { Button } from "@/components/ui/button";
-import { findFVGs } from "@/lib/ict";
+import { findFVGs, type ICTSignal } from "@/lib/ict";
 
 /* ── Types ─────────────── */
 
@@ -105,9 +105,11 @@ type DailyLabel = (typeof DAILY_TFS)[number]["label"];
 
 interface ChartWidgetProps {
     symbol?: string;
+    onSignals?: (signals: ICTSignal[]) => void;
+    onIntervalChange?: (interval: string) => void;
 }
 
-export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
+export function ChartWidget({ symbol = "NQ=F", onSignals, onIntervalChange }: ChartWidgetProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -372,7 +374,8 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
 
             // ── ICT: FVG zones + Entry Signal markers (v5 plugin API) ──
             if (candleSeriesRef.current) {
-                const fvgMarkers = findFVGs(candles).map((m) => ({
+                const { markers: fvgMarkerList, signals } = findFVGs(candles);
+                const fvgMarkers = fvgMarkerList.map((m) => ({
                     time: m.time as Time,
                     position: m.position,
                     color: m.color,
@@ -382,7 +385,6 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
                 })) as SeriesMarker<Time>[];
 
                 if (!markersPluginRef.current) {
-                    // Create the plugin once after the series exists
                     markersPluginRef.current = createSeriesMarkers(
                         candleSeriesRef.current,
                         fvgMarkers
@@ -390,6 +392,9 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
                 } else {
                     markersPluginRef.current.setMarkers(fvgMarkers);
                 }
+
+                // Emit signals to parent for the SignalPanel
+                onSignals?.(signals);
             }
 
             // ── Set initial legend to last bar ──
@@ -432,10 +437,10 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
                             variant={activeDailyIdx === null && activeInterval === tf.interval ? "default" : "ghost"}
                             size="sm"
                             className={`h-6 px-2.5 text-xs font-mono-num ${activeDailyIdx === null && activeInterval === tf.interval
-                                    ? "bg-primary text-primary-foreground"
-                                    : "text-muted-foreground hover:text-foreground"
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:text-foreground"
                                 }`}
-                            onClick={() => { setActiveInterval(tf.interval); setActiveDailyIdx(null); }}
+                            onClick={() => { setActiveInterval(tf.interval); setActiveDailyIdx(null); onIntervalChange?.(tf.interval); }}
                         >
                             {tf.label}
                         </Button>
@@ -448,10 +453,10 @@ export function ChartWidget({ symbol = "NQ=F" }: ChartWidgetProps) {
                             variant={activeDailyIdx === i ? "default" : "ghost"}
                             size="sm"
                             className={`h-6 px-2.5 text-xs font-mono-num ${activeDailyIdx === i
-                                    ? "bg-primary text-primary-foreground"
-                                    : "text-muted-foreground hover:text-foreground"
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:text-foreground"
                                 }`}
-                            onClick={() => setActiveDailyIdx(i)}
+                            onClick={() => { setActiveDailyIdx(i); onIntervalChange?.(tf.label); }}
                         >
                             {tf.label}
                         </Button>
