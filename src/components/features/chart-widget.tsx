@@ -109,10 +109,11 @@ interface ChartWidgetProps {
     symbol?: string;
     onSignals?: (signals: ICTSignal[]) => void;
     onIntervalChange?: (interval: string) => void;
-    onLiveTrade?: (trade: LiveTrade) => void;
+    /** Latest trade tick pushed in from the parent's WebSocket hook */
+    latestTrade?: LiveTrade | null;
 }
 
-export function ChartWidget({ symbol = "NQ=F", onSignals, onIntervalChange, onLiveTrade }: ChartWidgetProps) {
+export function ChartWidget({ symbol = "NQ=F", onSignals, onIntervalChange, latestTrade }: ChartWidgetProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -132,46 +133,34 @@ export function ChartWidget({ symbol = "NQ=F", onSignals, onIntervalChange, onLi
     const [error, setError] = useState<string | null>(null);
     const [legend, setLegend] = useState<LegendData | null>(null);
 
-    /* ── Live trade → update last candle ─────────────── */
+    /* ── React to live trade ticks (pushed in from parent) ─────────────── */
 
     useEffect(() => {
-        if (!onLiveTrade) return;
-        // Expose a handler that parent calls with each trade tick
-        // We can't directly hook into this without a ref, so we surface
-        // the live-update logic via the candleSeriesRef.
-    }, [onLiveTrade]);
+        if (!latestTrade || !candleSeriesRef.current) return;
 
-    /* ── Live candle updater (called by parent via onLiveTrade callback) ─── */
-    const handleLiveTrade = useCallback((trade: LiveTrade) => {
+        // Only handle trades for the currently displayed symbol
         const fhSym = toFHSymbol(symbol);
-        if (trade.symbol !== fhSym && trade.symbol !== symbol) return;
-        if (!candleSeriesRef.current) return;
-
-        // Build a synthetic "current" candle time bucket (floor to bar boundary)
-        const now = Math.floor(Date.now() / 1000);
+        if (latestTrade.symbol !== fhSym && latestTrade.symbol !== symbol) return;
 
         const candles = candleDataRef.current;
         if (!candles.length) return;
 
         const lastCandle = candles[candles.length - 1];
-        const lastTime = typeof lastCandle.time === "string"
-            ? 0
-            : (lastCandle.time as number);
 
-        // Only update intraday candles (numeric time)
+        // Only update intraday candles (numeric Unix-second time)
         if (typeof lastCandle.time !== "number") return;
 
         const updatedCandle = {
-            time: lastTime as Time,
+            time: lastCandle.time as Time,
             open: lastCandle.open,
-            high: Math.max(lastCandle.high, trade.price),
-            low: Math.min(lastCandle.low, trade.price),
-            close: trade.price,
+            high: Math.max(lastCandle.high, latestTrade.price),
+            low: Math.min(lastCandle.low, latestTrade.price),
+            close: latestTrade.price,
         };
 
         try {
             candleSeriesRef.current.update(updatedCandle);
-            // Mutate our ref so legend stays accurate
+            // Keep the ref in sync so the legend and FVG logic see fresh data
             candles[candles.length - 1] = {
                 ...lastCandle,
                 high: updatedCandle.high,
@@ -179,19 +168,9 @@ export function ChartWidget({ symbol = "NQ=F", onSignals, onIntervalChange, onLi
                 close: updatedCandle.close,
             };
         } catch {
-            // Ignore update errors (chart may not be initialized yet)
+            // Chart may not be fully initialized yet — safe to ignore
         }
-    }, [symbol]);
-
-    /* Expose handleLiveTrade to parent via the onLiveTrade prop */
-    const onLiveTradeRef = useRef(handleLiveTrade);
-    onLiveTradeRef.current = handleLiveTrade;
-
-    useEffect(() => {
-        if (!onLiveTrade) return;
-        // Notify parent: call us back with each trade
-        // The parent stores our handler via a ref — see page.tsx
-    }, [onLiveTrade]);
+    }, [latestTrade, symbol]);
 
     /* ── Fetch helper ─────────────── */
 

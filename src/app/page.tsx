@@ -49,22 +49,15 @@ export default function DashboardPage() {
 
   const [signals, setSignals] = useState<ICTSignal[]>([]);
   const [currentInterval, setCurrentInterval] = useState("15m");
+  const [latestTrade, setLatestTrade] = useState<LiveTrade | null>(null);
 
-  /* ── Page-level Finnhub WebSocket ── */
-  // Live trade handler ref — points to ChartWidget's internal updater
-  const chartLiveHandlerRef = useRef<((trade: LiveTrade) => void) | null>(null);
+  // Single page-level WebSocket — feeds both ticker tape and chart live updates
+  const { quotes: tickerQuotes, wsStatus } = useRealtimeQuotes(
+    TICKER_SYMBOLS_FH,
+    setLatestTrade   // ← each trade tick updates latestTrade → ChartWidget re-renders
+  );
 
-  const handleLiveTrade = useCallback((trade: LiveTrade) => {
-    chartLiveHandlerRef.current?.(trade);
-  }, []);
 
-  // Subscribe at page level so TickerTape + ChartWidget share one WS connection
-  const { quotes: tickerQuotes, wsStatus } = useRealtimeQuotes(TICKER_SYMBOLS_FH, handleLiveTrade);
-
-  /* Callback for ChartWidget to register its internal live-update handler */
-  const registerChartHandler = useCallback((handler: (trade: LiveTrade) => void) => {
-    chartLiveHandlerRef.current = handler;
-  }, []);
 
   return (
     <div className="space-y-4">
@@ -96,6 +89,7 @@ export default function DashboardPage() {
               symbol={activeSymbol}
               onSignals={setSignals}
               onIntervalChange={setCurrentInterval}
+              latestTrade={latestTrade}
             />
           </CardContent>
         </Card>
